@@ -6,6 +6,50 @@ use std::io::{BufRead, BufReader};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::str::FromStr;
+
+use clap::{crate_authors, crate_version, ArgEnum, Clap};
+
+
+/// `Command`
+///
+///
+#[derive(ArgEnum, Debug)]
+enum Command {
+    Count,
+    Split
+}
+
+impl FromStr for Command {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match &s.to_lowercase()[..] {
+            "count" => Ok(Self::Count),
+            "split" => Ok(Self::Split),
+            invalid => Err(format!("{} is an invalid command", invalid)),
+        }
+    }
+}
+
+impl Default for Command {
+    fn default() -> Self { Self::Count }
+}
+
+#[derive(Clap)]
+#[clap(version = crate_version!(), author = crate_authors!())]
+struct Opts {
+    // #[clap(short, long)]
+    // split: bool,
+    // #[clap(short, long)]
+    // count: bool,
+    #[clap(short, long)]
+    file_name: Option<String>,
+    #[clap(short, long)]
+    regex: Option<String>,
+    #[clap(possible_values(Command::VARIANTS)/*, default_value("count")*/)]
+    command: Command,
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -32,7 +76,7 @@ fn main() {
                 .replace(":", "_")
                 .replace("?", "_")
                 .replace("*", "_")
-                .replace("\\", "_")
+                .replace(r"\", "_")
                 .replace("\"", "_");
             // println!("{}.{} open file", _index + 1, dfilename);
 
