@@ -10,6 +10,7 @@ use std::str::FromStr;
 
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
+use console::style;
 
 /// `Command`
 ///
@@ -17,7 +18,7 @@ use clap::{crate_authors, crate_version, ArgEnum, Clap};
 #[derive(ArgEnum, Debug)]
 enum Command {
     Count,
-    Split
+    Split,
 }
 
 impl FromStr for Command {
@@ -33,7 +34,9 @@ impl FromStr for Command {
 }
 
 impl Default for Command {
-    fn default() -> Self { Self::Count }
+    fn default() -> Self {
+        Self::Count
+    }
 }
 
 #[derive(Clap)]
@@ -44,24 +47,15 @@ struct Opts {
     // #[clap(short, long)]
     // count: bool,
     #[clap(short, long)]
-    file_name: Option<String>,
+    file_name: String,
     #[clap(short, long)]
-    regex: Option<String>,
+    regex: String,
     #[clap(possible_values(Command::VARIANTS)/*, default_value("count")*/)]
     command: Command,
 }
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    let filename = &args[1];
-    let splitregex = &args[2];
-
-    // Open the file in read-only mode (ignoring errors).
-    let file = File::open(filename).unwrap();
-    let reader = BufReader::new(file);
-    let re = Regex::new(splitregex).unwrap();
-    let mut open_files: HashMap<String, File> = HashMap::new();
+fn split (reader: BufReader<File>, re: Regex) {
+    let mut findings: HashMap<String, File> = HashMap::new();
 
     for (index, line) in reader.lines().enumerate() {
         //  iconv -s -f "CP1252" -t UTF-8 "thinmon.log" > ttt
@@ -71,26 +65,74 @@ fn main() {
         let line = line.unwrap();
         for cap in re.captures_iter(&line) {
             let rawfilename = format!("{}.log", &cap[1]);
-            let dfilename = &rawfilename
-                .replace("/", "_")
-                .replace(":", "_")
-                .replace("?", "_")
-                .replace("*", "_")
-                .replace(r"\", "_")
-                .replace("\"", "_");
             // println!("{}.{} open file", _index + 1, dfilename);
 
-            let file = open_files.entry(dfilename.to_string()).or_insert(
+            let file = findings.entry(rawfilename.to_string()).or_insert(
                 OpenOptions::new()
                     .append(true)
                     .create(true)
-                    .open(dfilename)
+                    .open(
+                        &rawfilename
+                            .replace("/", "_")
+                            .replace(":", "_")
+                            .replace("?", "_")
+                            .replace("*", "_")
+                            .replace(r"\", "_")
+                            .replace("\"", "_"),
+                    )
                     .expect("cannot open file"),
             );
 
-            file.write_all(line.as_bytes()).expect("write failed");
-            file.write_all("\n".as_bytes()).expect("write failed");
+            file.write_all(line.as_bytes())
+                .and(file.write_all(b"\n"))
+                .expect("write failed");
             // println!("{}.{}: {}", index + 1, dfilename, line);
         }
     }
+}
+
+fn count (reader: BufReader<File>, re: Regex, args: Vec<String>) {
+    let mut findings: HashMap<String, u32> = HashMap::new();
+
+    for (index, line) in reader.lines().enumerate() {
+        //  iconv -s -f "CP1252" -t UTF-8 "thinmon.log" > ttt
+        if line.is_err() {
+            println!("Error in line: {}", index);
+        }
+        let line = line.unwrap();
+        for cap in re.captures_iter(&line) {
+            findings.entry(cap[1].to_string()).and_modify(|c| *c = *c + 1).or_insert(1);
+        }
+    }
+
+    let mut sorted: Vec<(_, _)> = findings.iter().collect();
+    sorted.sort_by(|a, b| a.1.cmp(b.1).reverse());
+
+    if findings.len() > 0 {
+        println!("{:?}", &args[1..]);
+        println!("found {} unique results", findings.len());
+        // for (name, count) in findings {
+        for (name, count) in sorted {
+                println!("{cnt:>5} {n}", cnt = style(format!("{}", count)).yellow(), n = name);
+        }
+    }
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    let opts = Opts::parse();
+    let filename = opts.file_name;
+    let splitregex = &opts.regex;
+    let command = opts.command;
+
+    let file = File::open(filename).unwrap();
+    let reader = BufReader::new(file);
+    let re = Regex::new(splitregex).unwrap();
+
+    match command {
+        Command::Count => count (reader, re, args),
+        Command::Split => split (reader, re),
+    }
+    
 }
