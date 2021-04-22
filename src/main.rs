@@ -54,7 +54,7 @@ struct Opts {
     command: Command,
 }
 
-fn split (reader: BufReader<File>, re: Regex) {
+fn split(reader: BufReader<File>, re: Regex) {
     let mut findings: HashMap<String, File> = HashMap::new();
 
     for (index, line) in reader.lines().enumerate() {
@@ -73,11 +73,14 @@ fn split (reader: BufReader<File>, re: Regex) {
                     .create(true)
                     .open(
                         &rawfilename
-                            .replace("/", "_")
+                            .replace(">", "_")
+                            .replace("<", "_")
                             .replace(":", "_")
                             .replace("?", "_")
                             .replace("*", "_")
+                            .replace(r"/", "_")
                             .replace(r"\", "_")
+                            .replace(r"|", "_")
                             .replace("\"", "_"),
                     )
                     .expect("cannot open file"),
@@ -91,7 +94,7 @@ fn split (reader: BufReader<File>, re: Regex) {
     }
 }
 
-fn count (reader: BufReader<File>, re: Regex, args: Vec<String>) {
+fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     let mut findings: HashMap<String, u32> = HashMap::new();
 
     for (index, line) in reader.lines().enumerate() {
@@ -101,7 +104,10 @@ fn count (reader: BufReader<File>, re: Regex, args: Vec<String>) {
         }
         let line = line.unwrap();
         for cap in re.captures_iter(&line) {
-            findings.entry(cap[1].to_string()).and_modify(|c| *c = *c + 1).or_insert(1);
+            findings
+                .entry(cap[1].to_string())
+                .and_modify(|c| *c = *c + 1)
+                .or_insert(1);
         }
     }
 
@@ -113,7 +119,11 @@ fn count (reader: BufReader<File>, re: Regex, args: Vec<String>) {
         println!("found {} unique results", findings.len());
         // for (name, count) in findings {
         for (name, count) in sorted {
-                println!("{cnt:>5} {n}", cnt = style(format!("{}", count)).yellow(), n = name);
+            println!(
+                "{cnt:>5} {n}",
+                cnt = style(format!("{}", count)).yellow(),
+                n = name
+            );
         }
     }
 }
@@ -131,8 +141,7 @@ fn main() {
     let re = Regex::new(splitregex).unwrap();
 
     match command {
-        Command::Count => count (reader, re, args),
-        Command::Split => split (reader, re),
+        Command::Count => count(reader, re, args),
+        Command::Split => split(reader, re),
     }
-    
 }
