@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["count", "--file-name", "c:\\temp\\csplitTest\\j", "--regex", "^\\d+:\\d+:\\d+:\\d+  \\d+\\.\\d+\\.\\d+\\s+(\\d+)|OpenPort2\\s+(.*)"],
+            "args": ["split", "--file-name", "c:\\temp\\csplitTest\\j", "--regex", "^\\d+:\\d+:\\d+:\\d+  \\d+\\.\\d+\\.\\d+\\s+(\\d+)|OpenPort2\\s+(.*)"],
             "cwd": "${workspaceFolder}"
         },
         {
