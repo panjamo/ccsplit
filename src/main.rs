@@ -19,6 +19,7 @@ use console::style;
 enum Command {
     Count,
     Split,
+    Time,
 }
 
 impl FromStr for Command {
@@ -28,6 +29,7 @@ impl FromStr for Command {
         match &s.to_lowercase()[..] {
             "count" => Ok(Self::Count),
             "split" => Ok(Self::Split),
+            "time" => Ok(Self::Time),
             invalid => Err(format!("{} is an invalid command", invalid)),
         }
     }
@@ -46,6 +48,8 @@ struct Opts {
     // split: bool,
     // #[clap(short, long)]
     // count: bool,
+    #[clap(short, long)]
+    min: String,
     #[clap(short, long)]
     file_name: String,
     #[clap(short, long)]
@@ -103,6 +107,46 @@ fn split(reader: BufReader<File>, re: Regex) {
     }
 }
 
+fn timesplit(reader: BufReader<File>, re: Regex, min: String ) {
+    //let mut findings: HashMap<String, File> = HashMap::new();
+    // let mut last_used_file_name: String = "".to_string();
+
+    for (index, line) in reader.lines().enumerate() {
+        //  iconv -s -f "CP1252" -t UTF-8 "thinmon.log" > ttt
+        if line.is_err() {
+            println!("Error in line: {}", index);
+        }
+        let splitregex = "(\\d+)-(\\d+)-(\\d+) (\\d+):(\\d+):(\\d+):(\\d+)";
+        let reparam = Regex::new(splitregex).unwrap();
+
+        if let Some(caps) = reparam.captures(&min) {
+            let _param_year: u32  =  (caps.get(1).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_month: u32  = (caps.get(2).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_day: u32  =   (caps.get(3).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_hour: u32  =  (caps.get(4).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_min: u32  =   (caps.get(5).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_sec: u32  =   (caps.get(6).map_or("", |m| m.as_str())).parse().unwrap();
+            let _param_msec: u32  =  (caps.get(7).map_or("", |m| m.as_str())).parse().unwrap();
+            let line = line.unwrap();
+            if let Some(caps) = re.captures(&line) {
+                let _year: u32  =  (caps.get(1).map_or("", |m| m.as_str())).parse().unwrap();
+                let _month: u32  = (caps.get(2).map_or("", |m| m.as_str())).parse().unwrap();
+                let _day: u32  =   (caps.get(3).map_or("", |m| m.as_str())).parse().unwrap();
+                let _hour: u32  =  (caps.get(4).map_or("", |m| m.as_str())).parse().unwrap();
+                let _min: u32  =   (caps.get(5).map_or("", |m| m.as_str())).parse().unwrap();
+                let _sec: u32  =   (caps.get(6).map_or("", |m| m.as_str())).parse().unwrap();
+                let _msec: u32  =  (caps.get(7).map_or("", |m| m.as_str())).parse().unwrap();
+                if _min < _param_min {
+                    continue;
+                }
+                println!("{}", &line);
+            } else {
+                // println!("{}", &line);
+            }
+        }
+    }
+}
+
 fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     let mut count_findings: HashMap<String, u32> = HashMap::new();
     let mut found_all = 0;
@@ -146,6 +190,7 @@ fn main() {
     let filename = opts.file_name;
     let splitregex = &opts.regex;
     let command = opts.command;
+    let min = opts.min;
 
     let file = File::open(filename).unwrap();
     let reader = BufReader::new(file);
@@ -154,5 +199,6 @@ fn main() {
     match command {
         Command::Count => count(reader, re, args),
         Command::Split => split(reader, re),
+        Command::Time => timesplit(reader, re, min),
     }
 }
