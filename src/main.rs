@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
+use chrono::{NaiveDateTime};
 
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
@@ -48,12 +49,17 @@ struct Opts {
     // split: bool,
     // #[clap(short, long)]
     // count: bool,
+    ///e.g. --starttime "2021-06-29 13:06:56"
     #[clap(short, long)]
-    min: String,
+    starttime: Option<String>,
+    /// e.g. --stoptime "2021-06-29 13:18:06"
+    #[clap(short, long)]
+    stoptime: Option<String>,
     #[clap(short, long)]
     file_name: String,
+    /// don't forget the () for cature the e.g. process id
     #[clap(short, long)]
-    regex: String,
+    regex: Option<String>,
     #[clap(possible_values(Command::VARIANTS)/*, default_value("count")*/)]
     command: Command,
 }
@@ -107,41 +113,49 @@ fn split(reader: BufReader<File>, re: Regex) {
     }
 }
 
-fn timesplit(reader: BufReader<File>, re: Regex, min: String ) {
+fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str ) {
     //let mut findings: HashMap<String, File> = HashMap::new();
     // let mut last_used_file_name: String = "".to_string();
+
+    let splitregex = "\\d+-\\d+-\\d+ \\d+:\\d+:\\d+";
+    let reparam = Regex::new(splitregex).unwrap();
+
+    let limit_head = NaiveDateTime::parse_from_str(cuthead, "%Y-%m-%d %H:%M:%S");
+    let limit_tail = NaiveDateTime::parse_from_str(cuttail, "%Y-%m-%d %H:%M:%S");
+    let mut last_result: bool = false;
 
     for (index, line) in reader.lines().enumerate() {
         //  iconv -s -f "CP1252" -t UTF-8 "thinmon.log" > ttt
         if line.is_err() {
-            println!("Error in line: {}", index);
+            eprintln!("Error in line: {}", index);
         }
-        let splitregex = "(\\d+)-(\\d+)-(\\d+) (\\d+):(\\d+):(\\d+):(\\d+)";
-        let reparam = Regex::new(splitregex).unwrap();
 
-        if let Some(caps) = reparam.captures(&min) {
-            let _param_year: u32  =  (caps.get(1).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_month: u32  = (caps.get(2).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_day: u32  =   (caps.get(3).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_hour: u32  =  (caps.get(4).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_min: u32  =   (caps.get(5).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_sec: u32  =   (caps.get(6).map_or("", |m| m.as_str())).parse().unwrap();
-            let _param_msec: u32  =  (caps.get(7).map_or("", |m| m.as_str())).parse().unwrap();
-            let line = line.unwrap();
-            if let Some(caps) = re.captures(&line) {
-                let _year: u32  =  (caps.get(1).map_or("", |m| m.as_str())).parse().unwrap();
-                let _month: u32  = (caps.get(2).map_or("", |m| m.as_str())).parse().unwrap();
-                let _day: u32  =   (caps.get(3).map_or("", |m| m.as_str())).parse().unwrap();
-                let _hour: u32  =  (caps.get(4).map_or("", |m| m.as_str())).parse().unwrap();
-                let _min: u32  =   (caps.get(5).map_or("", |m| m.as_str())).parse().unwrap();
-                let _sec: u32  =   (caps.get(6).map_or("", |m| m.as_str())).parse().unwrap();
-                let _msec: u32  =  (caps.get(7).map_or("", |m| m.as_str())).parse().unwrap();
-                if _min < _param_min {
-                    continue;
+        let line = line.unwrap();
+        if let Some(caps) = reparam.captures(&line) {
+            let timestring = caps.get(0).map_or("", |m| m.as_str());
+
+            if let Ok(linetime) = NaiveDateTime::parse_from_str(&timestring, "%Y-%m-%d %H:%M:%S") {
+
+                let result = match (limit_head, limit_tail) {
+                    (Ok(h),Err(_)) => linetime >= h,
+                    (Err(_),Ok(t)) => linetime <= t,
+                    (Ok(h),Ok(t)) => linetime >= h && linetime <= t,
+                    (Err(_),Err(_)) => panic!("both dates wrong"),
+                };
+
+                if result {
+                    println!("{}", &line);
+                    last_result = true;
                 }
+                if let Ok(limit_tail)=limit_tail {
+                    if  linetime >= limit_tail {
+                        break;
+                    }
+                }
+            }
+        } else {
+            if last_result {
                 println!("{}", &line);
-            } else {
-                // println!("{}", &line);
             }
         }
     }
@@ -188,17 +202,18 @@ fn main() {
 
     let opts = Opts::parse();
     let filename = opts.file_name;
-    let splitregex = &opts.regex;
+    let splitregex = opts.regex.unwrap_or_default();
+    let cuthead = opts.starttime.unwrap_or_default();
+    let cuttail = opts.stoptime.unwrap_or_default();
     let command = opts.command;
-    let min = opts.min;
 
     let file = File::open(filename).unwrap();
     let reader = BufReader::new(file);
-    let re = Regex::new(splitregex).unwrap();
+    let re = Regex::new(&splitregex).unwrap();
 
     match command {
         Command::Count => count(reader, re, args),
         Command::Split => split(reader, re),
-        Command::Time => timesplit(reader, re, min),
+        Command::Time => timesplit(reader, &cuthead, &cuttail),
     }
 }
