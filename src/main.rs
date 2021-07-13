@@ -192,7 +192,9 @@ fn timediff(reader: BufReader<File>, minuendregex: &str, subtrahendregex: &str, 
 
             let timestring = caps.get(0).map_or("", |m| m.as_str());
             let mut complete_timestring: String = "2021/".to_owned();
+            let zeros: String = "000000".to_owned();
             complete_timestring.push_str(timestring);
+            complete_timestring.push_str(&zeros);
 
             if let Ok(_linetime) = NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f") {
 
