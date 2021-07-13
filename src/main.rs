@@ -8,6 +8,7 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
 use chrono::{NaiveDateTime};
+use chrono::{offset::TimeZone, DateTime, Local};
 
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
@@ -21,6 +22,7 @@ enum Command {
     Count,
     Split,
     Time,
+    Diff,
 }
 
 impl FromStr for Command {
@@ -31,6 +33,7 @@ impl FromStr for Command {
             "count" => Ok(Self::Count),
             "split" => Ok(Self::Split),
             "time" => Ok(Self::Time),
+            "diff" => Ok(Self::Diff),
             invalid => Err(format!("{} is an invalid command", invalid)),
         }
     }
@@ -55,6 +58,12 @@ struct Opts {
     /// e.g. --stoptime "2021-06-29 13:18:06"
     #[clap(short, long)]
     stoptime: Option<String>,
+    /// e.g. --minuend  "regex"
+    #[clap(short, long)]
+    minuend: Option<String>,
+    /// e.g. --subtrahend  "regex"
+    #[clap(short, long)]
+    subtrahend: Option<String>,
     #[clap(short, long)]
     file_name: String,
     /// don't forget the () for cature the e.g. process id
@@ -161,6 +170,47 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str ) {
     }
 }
 
+fn timediff(reader: BufReader<File>, minuendregex: &str, subtrahendregex: &str, log_file_name: &str) {
+
+    let splitregex = "^\\d+/\\d+ \\d+:\\d+:\\d+:\\d+";
+    let reparam = Regex::new(splitregex).unwrap();
+
+    let minuend = Regex::new(minuendregex).unwrap();
+    let subtrahend = Regex::new(subtrahendregex).unwrap();
+
+    let mut date_time: DateTime<Local> = Local::now();
+    let mut linenr = 0;
+
+    for (index, line) in reader.lines().enumerate() {
+        if line.is_err() {
+            eprintln!("Error in line: {}", index);
+        }
+        linenr += 1;
+        let line = line.unwrap();
+
+        if let Some(caps) = reparam.captures(&line) {
+
+            let timestring = caps.get(0).map_or("", |m| m.as_str());
+            let mut complete_timestring: String = "2021/".to_owned();
+            complete_timestring.push_str(timestring);
+
+            if let Ok(_linetime) = NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f") {
+
+                if minuend.is_match(&line) {
+                    date_time = Local.from_local_datetime(&NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f").unwrap()).unwrap();
+                }
+                else if subtrahend.is_match(&line) {
+                    let end_time: DateTime<Local> = Local.from_local_datetime(&NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f").unwrap()).unwrap();
+                    let resulttime = end_time.signed_duration_since(date_time);
+                    println!("{}:{} {}", log_file_name, linenr, &resulttime);
+                }
+
+            }
+        }
+     }
+}
+
+
 fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     let mut count_findings: HashMap<String, u32> = HashMap::new();
     let mut found_all = 0;
@@ -205,9 +255,11 @@ fn main() {
     let splitregex = opts.regex.unwrap_or_default();
     let cuthead = opts.starttime.unwrap_or_default();
     let cuttail = opts.stoptime.unwrap_or_default();
+    let subtrahend = opts.subtrahend.unwrap_or_default();
+    let minuend = opts.minuend.unwrap_or_default();
     let command = opts.command;
 
-    let file = File::open(filename).unwrap();
+    let file = File::open(&filename).unwrap();
     let reader = BufReader::new(file);
     let re = Regex::new(&splitregex).unwrap();
 
@@ -215,5 +267,6 @@ fn main() {
         Command::Count => count(reader, re, args),
         Command::Split => split(reader, re),
         Command::Time => timesplit(reader, &cuthead, &cuttail),
+        Command::Diff => timediff(reader, &minuend, &subtrahend, &filename),
     }
 }
