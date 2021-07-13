@@ -199,14 +199,13 @@ fn timediff(reader: BufReader<File>, minuendregex: &str, subtrahendregex: &str, 
             if let Ok(_linetime) = NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f") {
 
                 if minuend.is_match(&line) {
-                    date_time = Local.from_local_datetime(&NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f").unwrap()).unwrap();
+                    date_time = Local.from_local_datetime(&_linetime).unwrap();
                 }
                 else if subtrahend.is_match(&line) {
-                    let end_time: DateTime<Local> = Local.from_local_datetime(&NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f").unwrap()).unwrap();
+                    let end_time: DateTime<Local> = Local.from_local_datetime(&_linetime).unwrap();
                     let resulttime = end_time.signed_duration_since(date_time);
-                    println!("{}:{} {}", log_file_name, linenr, &resulttime);
+                    println!("{} [ {}:{} ] )", resulttime, log_file_name, linenr);
                 }
-
             }
         }
      }
