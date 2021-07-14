@@ -3,12 +3,12 @@ use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 // https://doc.rust-lang.org/std/collections/struct.HashMap.html
+use chrono::NaiveDateTime;
+use chrono::{offset::TimeZone, DateTime, Local};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::str::FromStr;
-use chrono::{NaiveDateTime};
-use chrono::{offset::TimeZone, DateTime, Local};
 
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
@@ -48,22 +48,18 @@ impl Default for Command {
 #[derive(Clap)]
 #[clap(version = crate_version!(), author = crate_authors!())]
 struct Opts {
-    // #[clap(short, long)]
-    // split: bool,
-    // #[clap(short, long)]
-    // count: bool,
     ///e.g. --starttime "2021-06-29 13:06:56"
-    #[clap(short, long)]
+    #[clap(long)]
     starttime: Option<String>,
     /// e.g. --stoptime "2021-06-29 13:18:06"
-    #[clap(short, long)]
+    #[clap(long)]
     stoptime: Option<String>,
-    /// e.g. --minuend  "regex"
-    #[clap(short, long)]
-    minuend: Option<String>,
-    /// e.g. --subtrahend  "regex"
-    #[clap(short, long)]
-    subtrahend: Option<String>,
+    /// e.g. --subtrahend_regex  "regex"
+    #[clap(long)]
+    subtrahend_regex: Option<String>,
+    /// e.g. --minuend_regex  "regex"
+    #[clap(long)]
+    minuend_regex: Option<String>,
     #[clap(short, long)]
     file_name: String,
     /// don't forget the () for cature the e.g. process id
@@ -74,7 +70,6 @@ struct Opts {
 }
 
 fn write_line_to_key_file(findings: &mut HashMap<String, File>, key: &str, line: &str) {
-
     let file = findings.entry(key.to_string()).or_insert(
         OpenOptions::new()
             .append(true)
@@ -122,12 +117,12 @@ fn split(reader: BufReader<File>, re: Regex) {
     }
 }
 
-fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str ) {
+fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
     //let mut findings: HashMap<String, File> = HashMap::new();
     // let mut last_used_file_name: String = "".to_string();
 
-    let splitregex = "\\d+-\\d+-\\d+ \\d+:\\d+:\\d+";
-    let reparam = Regex::new(splitregex).unwrap();
+    let time_pattern = "\\d+-\\d+-\\d+ \\d+:\\d+:\\d+";
+    let time_regex = Regex::new(time_pattern).unwrap();
 
     let limit_head = NaiveDateTime::parse_from_str(cuthead, "%Y-%m-%d %H:%M:%S");
     let limit_tail = NaiveDateTime::parse_from_str(cuttail, "%Y-%m-%d %H:%M:%S");
@@ -140,24 +135,23 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str ) {
         }
 
         let line = line.unwrap();
-        if let Some(caps) = reparam.captures(&line) {
+        if let Some(caps) = time_regex.captures(&line) {
             let timestring = caps.get(0).map_or("", |m| m.as_str());
 
             if let Ok(linetime) = NaiveDateTime::parse_from_str(&timestring, "%Y-%m-%d %H:%M:%S") {
-
                 let result = match (limit_head, limit_tail) {
-                    (Ok(h),Err(_)) => linetime >= h,
-                    (Err(_),Ok(t)) => linetime <= t,
-                    (Ok(h),Ok(t)) => linetime >= h && linetime <= t,
-                    (Err(_),Err(_)) => panic!("both dates wrong"),
+                    (Ok(h), Err(_)) => linetime >= h,
+                    (Err(_), Ok(t)) => linetime <= t,
+                    (Ok(h), Ok(t)) => linetime >= h && linetime <= t,
+                    (Err(_), Err(_)) => panic!("both dates wrong"),
                 };
 
                 if result {
                     println!("{}", &line);
                     last_result = true;
                 }
-                if let Ok(limit_tail)=limit_tail {
-                    if  linetime >= limit_tail {
+                if let Ok(limit_tail) = limit_tail {
+                    if linetime >= limit_tail {
                         break;
                     }
                 }
@@ -170,25 +164,36 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str ) {
     }
 }
 
-fn timediff(reader: BufReader<File>, minuendregex: &str, subtrahendregex: &str, log_file_name: &str) {
+fn timediff(
+    reader: BufReader<File>,
+    subtrahendregex: &str,
+    minuendregex: &str,
+    log_file_name: &str,
+) {
+    let time_pattern = "^(\\d+)/(\\d+) (\\d+):(\\d+):(\\d+):(\\d+)";
+    let time_regex = Regex::new(time_pattern).unwrap();
 
-    let splitregex = "^\\d+/\\d+ \\d+:\\d+:\\d+:\\d+";
-    let reparam = Regex::new(splitregex).unwrap();
-
-    let minuend = Regex::new(minuendregex).unwrap();
-    let subtrahend = Regex::new(subtrahendregex).unwrap();
+    let subtrahend_regex = Regex::new(subtrahendregex).unwrap();
+    let minuend_regex = Regex::new(minuendregex).unwrap();
 
     let mut date_time: DateTime<Local> = Local::now();
-    let mut linenr = 0;
 
     for (index, line) in reader.lines().enumerate() {
         if line.is_err() {
             eprintln!("Error in line: {}", index);
         }
-        linenr += 1;
         let line = line.unwrap();
 
-        if let Some(caps) = reparam.captures(&line) {
+        if let Some(caps) = time_regex.captures(&line) {
+            time_regex.replace(
+                caps.get(0).map_or("", |m| m.as_str()),
+                "2021-$1-$2 $3:$4:$5:$6",
+            );
+
+            // | sed -r "s/^([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3}) +([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4})/\5-\6-\7 \1:\2:\3:\4/" ^
+            // | sed -r "s/^([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\3-\2-\1 \4:\5:\6:\7/" ^
+            // | sed -r "s/^([0-9]{4})[.-]([0-9]{2})[.-]([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\1-\2-\3 \4:\5:\6:\7/" ^
+            // | sed -r "s/^([0-9]{2})\/([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/2021-\1-\2 \3:\4:\5:\6/" ^
 
             let timestring = caps.get(0).map_or("", |m| m.as_str());
             let mut complete_timestring: String = "2021/".to_owned();
@@ -196,21 +201,22 @@ fn timediff(reader: BufReader<File>, minuendregex: &str, subtrahendregex: &str, 
             complete_timestring.push_str(timestring);
             complete_timestring.push_str(&zeros);
 
-            if let Ok(_linetime) = NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f") {
-
-                if minuend.is_match(&line) {
+            if let Ok(_linetime) =
+                NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f")
+            {
+                if subtrahend_regex.is_match(&line) {
+                    println!("[ {}:{} ] {}", log_file_name, index + 1, &line);
                     date_time = Local.from_local_datetime(&_linetime).unwrap();
-                }
-                else if subtrahend.is_match(&line) {
+                } else if minuend_regex.is_match(&line) {
                     let end_time: DateTime<Local> = Local.from_local_datetime(&_linetime).unwrap();
                     let resulttime = end_time.signed_duration_since(date_time);
-                    println!("{} [ {}:{} ] )", resulttime, log_file_name, linenr);
+                    println!("{} [ {}:{} ]", resulttime, log_file_name, index + 1);
+                    date_time = Local::now();
                 }
             }
         }
-     }
+    }
 }
-
 
 fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     let mut count_findings: HashMap<String, u32> = HashMap::new();
@@ -253,21 +259,46 @@ fn main() {
 
     let opts = Opts::parse();
     let filename = opts.file_name;
-    let splitregex = opts.regex.unwrap_or_default();
+    let time_pattern = opts.regex.unwrap_or_default();
     let cuthead = opts.starttime.unwrap_or_default();
     let cuttail = opts.stoptime.unwrap_or_default();
-    let subtrahend = opts.subtrahend.unwrap_or_default();
-    let minuend = opts.minuend.unwrap_or_default();
+    let minuend_regex = opts.minuend_regex.unwrap_or_default();
+    let subtrahend_regex = opts.subtrahend_regex.unwrap_or_default();
     let command = opts.command;
 
     let file = File::open(&filename).unwrap();
     let reader = BufReader::new(file);
-    let re = Regex::new(&splitregex).unwrap();
+    let re = Regex::new(&time_pattern).unwrap();
 
     match command {
         Command::Count => count(reader, re, args),
         Command::Split => split(reader, re),
         Command::Time => timesplit(reader, &cuthead, &cuttail),
-        Command::Diff => timediff(reader, &minuend, &subtrahend, &filename),
+        Command::Diff => timediff(reader, &subtrahend_regex, &minuend_regex, &filename),
     }
 }
+// extern crate regex;
+// use regex::Regex;
+
+// fn main1() {
+//     let rg = Regex::new(r"(\d+)").unwrap();
+
+//     // Regex::replace replaces first match
+//     // from it's first argument with the second argument
+//     // => Some string with numbers (not really)
+//     rg.replace("Some string with numbers 123", "(not really)");
+
+//     // Capture groups can be accesed via $number
+//     // => Some string with numbers (which are 123)
+//     rg.replace("Some string with numbers 123", "(which are $1)");
+
+//     let rg = Regex::new(r"(?P<num>\d+)").unwrap();
+
+//     // Named capture groups can be accesed via $name
+//     // => Some string with numbers (which are 123)
+//     rg.replace("Some string with numbers 123", "(which are $num)");
+
+//     // Regex::replace_all replaces all the matches, not only the first
+//     // => Some string with numbers (not really) (not really)
+//     rg.replace_all("Some string with numbers 123 321", "(not really)");
+// }
