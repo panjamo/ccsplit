@@ -19,6 +19,24 @@
                     "kind": "bin"
                 }
             },
+            "args": ["diff", "--file-name", "c:\\temp\\ClientDump\\LOG05HANG\\thinmon.log", "--subtrahend-regex", "OpenPrinterWrap\\s+Printer:", "--minuend-regex", "OpenPort2\\s+CS_EFA_"],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'ccsplit'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ccsplit",
+                    "--package=ccsplit"
+                ],
+                "filter": {
+                    "name": "ccsplit",
+                    "kind": "bin"
+                }
+            },
             "args": ["split", "--file-name", "c:\\temp\\csplitTest\\j", "--regex", "^\\d+:\\d+:\\d+:\\d+  \\d+\\.\\d+\\.\\d+\\s+(\\d+)|OpenPort2\\s+(.*)"],
             "cwd": "${workspaceFolder}"
         },

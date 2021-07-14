@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 // https://doc.rust-lang.org/std/collections/struct.HashMap.html
 use chrono::NaiveDateTime;
 use chrono::{offset::TimeZone, DateTime, Local};
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -13,6 +14,37 @@ use std::str::FromStr;
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
 use console::style;
+
+// TODO, homogenisieren der Logfiles ...
+// pushd logs
+// for /R %%G in ( *.7z ) do pushd %%~dpG & 7z x "%%G" -y & popd
+// for /R %%G in (*tpsw32.log) do iconv -s -f "CP1252" -t UTF-8 "%%G" > "%%G.log1" && mv -f "%%G.log1" "%%G"
+// for /R %%G in (*thinmon.log) do iconv -s -f "CP1252" -t UTF-8 "%%G" > "%%G.log1" && mv -f "%%G.log1" "%%G"
+// popd
+
+// Setlocal EnableDelayedExpansion
+// for /R %%G in (*.log) do (
+//     for /F %%D in ('file -bi "%%G" ^| awk -F "=" "{print $2}"') do (
+//         if [%%D] == [utf-16le] (
+//             echo %%G %%D ---- %%G.log1
+//             iconv -s -f "%%D" -t UTF-8 "%%G" | tr "\r" "\n" | tr -s "\n" "\n"  | tr -d \0 | sed "1s/^\xEF\xBB\xBF//" ^
+//             | sed -r "s/^([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3}) +([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4})/\5-\6-\7 \1:\2:\3:\4/" ^
+//             | sed -r "s/^([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\3-\2-\1 \4:\5:\6:\7/" ^
+//             | sed -r "s/^([0-9]{4})[.-]([0-9]{2})[.-]([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\1-\2-\3 \4:\5:\6:\7/" ^
+//             | sed -r "s/^([0-9]{2})\/([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/2021-\1-\2 \3:\4:\5:\6/" ^
+//             > "%%G.log1"
+//         ) ELSE (
+//             echo make \n and delete zero charcters
+//             tr "\r" "\n" < "%%G" | tr -d \0 | tr -s "\n" "\n" | sed "1s/^\xEF\xBB\xBF//" ^
+//             | sed -r "s/^([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3}) +([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4})/\5-\6-\7 \1:\2:\3:\4/" ^
+//             | sed -r "s/^([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\3-\2-\1 \4:\5:\6:\7/" ^
+//             | sed -r "s/^([0-9]{4})[.-]([0-9]{2})[.-]([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\1-\2-\3 \4:\5:\6:\7/" ^
+//             | sed -r "s/^([0-9]{2})\/([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/2021-\1-\2 \3:\4:\5:\6/" ^
+//             > "%%G.log1"
+//         )
+//         mv -f "%%G.log1" "%%G"
+//     )
+// )
 
 /// `Command`
 ///
@@ -164,39 +196,60 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
     }
 }
 
-fn detect_time_regex(line: &str) -> Option<(Regex, String)> {
-    let time_pattern_client_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
+fn detect_time_regex(line: &str) -> Option<(Regex, String, bool)> {
     let time_pattern_client_dest = r"2021-$1-$2 $3:$4:$5:$6";
-    let time_client_regex = Regex::new(time_pattern_client_src).unwrap();
-    if time_client_regex.is_match(line) {
-        return Some((time_client_regex, time_pattern_client_dest.to_owned()));
+    lazy_static! {
+        static ref TIME_CLIENT_REGEX: Regex =
+            Regex::new(r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)").unwrap();
     }
-
-    let time_pattern_thinmon_src =
-        r"^(\d{2}):(\d{2}):(\d{2})[:.](\d{3}) +(\d{2})[.-](\d{2})[.-](\d{4})";
-    let time_pattern_thinmon_dest = r"$5-$6-$7 $1:$2:$3:$4";
-    let time_thinmon_regex = Regex::new(time_pattern_thinmon_src).unwrap();
-    if time_thinmon_regex.is_match(line) {
-        return Some((time_thinmon_regex, time_pattern_thinmon_dest.to_owned()));
-    }
-
-    let time_pattern_renderslaveagent_src =
-        r"^(\d{4})[.-](\d{2})[.-](\d{2}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})";
-    let time_pattern_renderslaveagent_dest = r"$1-$2-$3 $4:$5:$6:$7";
-    let time_renderslaveagent_regex = Regex::new(time_pattern_renderslaveagent_src).unwrap();
-    if time_renderslaveagent_regex.is_match(line) {
+    if TIME_CLIENT_REGEX.is_match(line) {
         return Some((
-            time_renderslaveagent_regex,
-            time_pattern_renderslaveagent_dest.to_owned(),
+            TIME_CLIENT_REGEX.clone(),
+            time_pattern_client_dest.to_owned(),
+            true,
         ));
     }
 
-    let time_pattern_tppsrv_src =
-        r"^(\d{2})[.-](\d{2})[.-](\d{4}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})";
+    let time_pattern_thinmon_dest = r"$7-$6-$5 $1:$2:$3:$4";
+    lazy_static! {
+        static ref TIME_THINMON_REGEX: Regex =
+            Regex::new(r"^(\d{2}):(\d{2}):(\d{2})[:.](\d{3}) +(\d{2})[.-](\d{2})[.-](\d{4})")
+                .unwrap();
+    }
+    if TIME_THINMON_REGEX.is_match(line) {
+        return Some((
+            TIME_THINMON_REGEX.clone(),
+            time_pattern_thinmon_dest.to_owned(),
+            true,
+        ));
+    }
+
+    let time_pattern_renderslaveagent_dest = r"$1-$2-$3 $4:$5:$6:$7";
+    lazy_static! {
+        static ref TIME_RENDERSLAVEAGENT_REGEX: Regex =
+            Regex::new(r"^(\d{4})[.-](\d{2})[.-](\d{2}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})")
+                .unwrap();
+    }
+    if TIME_RENDERSLAVEAGENT_REGEX.is_match(line) {
+        return Some((
+            TIME_RENDERSLAVEAGENT_REGEX.clone(),
+            time_pattern_renderslaveagent_dest.to_owned(),
+            true,
+        ));
+    }
+
     let time_pattern_tppsrv_dest = r"$3-$2-$1 $4:$5:$6:$7";
-    let time_tppsrv_regex = Regex::new(time_pattern_tppsrv_src).unwrap();
-    if time_tppsrv_regex.is_match(line) {
-        return Some((time_tppsrv_regex, time_pattern_tppsrv_dest.to_owned()));
+    lazy_static! {
+        static ref TIME_TPPSRV_REGEX: Regex =
+            Regex::new(r"^(\d{2})[.-](\d{2})[.-](\d{4}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})")
+                .unwrap();
+    }
+    if TIME_TPPSRV_REGEX.is_match(line) {
+        return Some((
+            TIME_TPPSRV_REGEX.clone(),
+            time_pattern_tppsrv_dest.to_owned(),
+            true,
+        ));
     }
 
     None
@@ -208,14 +261,16 @@ fn timediff(
     minuendregex: &str,
     log_file_name: &str,
 ) {
-    let time_pattern_client_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
-    let time_pattern_client_dest = r"2021-$1-$2 $3:$4:$5:$6";
-    let time_client_regex = Regex::new(time_pattern_client_src).unwrap();
+    let time_pattern_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
+    let time_pattern_dest = r"2021-$1-$2 $3:$4:$5:$6".to_owned();
+    let time_regex = Regex::new(time_pattern_src).unwrap();
+
+    let mut times_tuple = (time_regex, time_pattern_dest, false);
 
     let subtrahend_regex = Regex::new(subtrahendregex).unwrap();
     let minuend_regex = Regex::new(minuendregex).unwrap();
 
-    let mut date_time: DateTime<Local> = Local::now();
+    let mut date_time: Option<DateTime<Local>> = None;
 
     for (index, line) in reader.lines().enumerate() {
         if line.is_err() {
@@ -223,23 +278,38 @@ fn timediff(
         }
         let line = line.unwrap();
 
-        if let Some(caps) = time_client_regex.captures(&line) {
+        if times_tuple.2 == false {
+            // println!("? [ {}:{} ] {}", log_file_name, index + 1, &line);
+            if let Some(tt) = detect_time_regex(&line) {
+                times_tuple = tt;
+            }
+        }
+
+        if let Some(caps) = times_tuple.0.captures(&line) {
             let raw_time_string = caps.get(0).map_or("", |m| m.as_str()).to_owned();
-            let complete_timestring =
-                time_client_regex.replace(&raw_time_string, time_pattern_client_dest) + "000000";
+            let complete_timestring = times_tuple
+                .0
+                .replace(&raw_time_string, times_tuple.1.as_str())
+                + "000000";
             // println!("{}", test);
 
             if let Ok(_linetime) =
                 NaiveDateTime::parse_from_str(&complete_timestring, "%Y-%m-%d %H:%M:%S:%f")
             {
-                if subtrahend_regex.is_match(&line) {
+                if minuend_regex.is_match(&line) {
                     println!("[ {}:{} ] {}", log_file_name, index + 1, &line);
-                    date_time = Local.from_local_datetime(&_linetime).unwrap();
-                } else if minuend_regex.is_match(&line) {
+                    date_time = Some(Local.from_local_datetime(&_linetime).unwrap());
+                } else if date_time.is_some() && subtrahend_regex.is_match(&line) {
                     let end_time: DateTime<Local> = Local.from_local_datetime(&_linetime).unwrap();
-                    let resulttime = end_time.signed_duration_since(date_time);
-                    println!("{} [ {}:{} ]", resulttime, log_file_name, index + 1);
-                    date_time = Local::now();
+                    let resulttime = end_time.signed_duration_since(date_time.unwrap());
+                    println!(
+                        "{} [ {}:{} ] {}",
+                        resulttime,
+                        log_file_name,
+                        index + 1,
+                        line
+                    );
+                    // date_time = None;
                 }
             }
         }
