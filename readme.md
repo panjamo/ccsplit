@@ -1,3 +1,4 @@
+```
 ccsplit 0.1.0
 Jochen Schieberlein <jochen.schieberlein@thinprint.com>
 
@@ -18,3 +19,4 @@ OPTIONS:
         --starttime <starttime>                  e.g. --starttime "2021-06-29 13:06:56"
         --stoptime <stoptime>                    e.g. --stoptime "2021-06-29 13:18:06"
         --subtrahend-regex <subtrahend-regex>    e.g. --subtrahend_regex  "regex"
+```
