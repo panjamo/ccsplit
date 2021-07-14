@@ -102,7 +102,7 @@ struct Opts {
 }
 
 fn write_line_to_key_file(findings: &mut HashMap<String, File>, key: &str, line: &str) {
-    let file = findings.entry(key.to_string()).or_insert(
+    let file = findings.entry(key.to_string()).or_insert_with(||
         OpenOptions::new()
             .append(true)
             .create(true)
@@ -188,10 +188,8 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
                     }
                 }
             }
-        } else {
-            if last_result {
-                println!("{}", &line);
-            }
+        } else if last_result {
+            println!("{}", &line);
         }
     }
 }
@@ -278,7 +276,7 @@ fn timediff(
         }
         let line = line.unwrap();
 
-        if times_tuple.2 == false {
+        if !times_tuple.2 {
             // println!("? [ {}:{} ] {}", log_file_name, index + 1, &line);
             if let Some(tt) = detect_time_regex(&line) {
                 times_tuple = tt;
@@ -327,10 +325,10 @@ fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
         }
         let line = line.unwrap();
         for cap in re.captures_iter(&line) {
-            found_all = found_all + 1;
+            found_all += 1;
             count_findings
                 .entry(cap[1].to_string())
-                .and_modify(|c| *c = *c + 1)
+                .and_modify(|c| *c += 1)
                 .or_insert(1);
         }
     }
@@ -338,7 +336,7 @@ fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     let mut sorted: Vec<(_, _)> = count_findings.iter().collect();
     sorted.sort_by(|a, b| a.1.cmp(b.1).reverse());
 
-    if count_findings.len() > 0 {
+    if !count_findings.is_empty() {
         println!("{:?}", &args[1..]);
         println!("found {} overall results", found_all);
         println!("found {} unique results", count_findings.len());
