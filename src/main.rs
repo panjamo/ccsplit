@@ -121,8 +121,8 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
     //let mut findings: HashMap<String, File> = HashMap::new();
     // let mut last_used_file_name: String = "".to_string();
 
-    let time_pattern = "\\d+-\\d+-\\d+ \\d+:\\d+:\\d+";
-    let time_regex = Regex::new(time_pattern).unwrap();
+    let time_pattern_client_src = "\\d+-\\d+-\\d+ \\d+:\\d+:\\d+";
+    let time_client_regex = Regex::new(time_pattern_client_src).unwrap();
 
     let limit_head = NaiveDateTime::parse_from_str(cuthead, "%Y-%m-%d %H:%M:%S");
     let limit_tail = NaiveDateTime::parse_from_str(cuttail, "%Y-%m-%d %H:%M:%S");
@@ -135,7 +135,7 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
         }
 
         let line = line.unwrap();
-        if let Some(caps) = time_regex.captures(&line) {
+        if let Some(caps) = time_client_regex.captures(&line) {
             let timestring = caps.get(0).map_or("", |m| m.as_str());
 
             if let Ok(linetime) = NaiveDateTime::parse_from_str(&timestring, "%Y-%m-%d %H:%M:%S") {
@@ -164,14 +164,53 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
     }
 }
 
+fn detect_time_regex(line: &str) -> Option<(Regex, String)> {
+    let time_pattern_client_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
+    let time_pattern_client_dest = r"2021-$1-$2 $3:$4:$5:$6";
+    let time_client_regex = Regex::new(time_pattern_client_src).unwrap();
+    if time_client_regex.is_match(line) {
+        return Some((time_client_regex, time_pattern_client_dest.to_owned()));
+    }
+
+    let time_pattern_thinmon_src =
+        r"^(\d{2}):(\d{2}):(\d{2})[:.](\d{3}) +(\d{2})[.-](\d{2})[.-](\d{4})";
+    let time_pattern_thinmon_dest = r"$5-$6-$7 $1:$2:$3:$4";
+    let time_thinmon_regex = Regex::new(time_pattern_thinmon_src).unwrap();
+    if time_thinmon_regex.is_match(line) {
+        return Some((time_thinmon_regex, time_pattern_thinmon_dest.to_owned()));
+    }
+
+    let time_pattern_renderslaveagent_src =
+        r"^(\d{4})[.-](\d{2})[.-](\d{2}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})";
+    let time_pattern_renderslaveagent_dest = r"$1-$2-$3 $4:$5:$6:$7";
+    let time_renderslaveagent_regex = Regex::new(time_pattern_renderslaveagent_src).unwrap();
+    if time_renderslaveagent_regex.is_match(line) {
+        return Some((
+            time_renderslaveagent_regex,
+            time_pattern_renderslaveagent_dest.to_owned(),
+        ));
+    }
+
+    let time_pattern_tppsrv_src =
+        r"^(\d{2})[.-](\d{2})[.-](\d{4}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})";
+    let time_pattern_tppsrv_dest = r"$3-$2-$1 $4:$5:$6:$7";
+    let time_tppsrv_regex = Regex::new(time_pattern_tppsrv_src).unwrap();
+    if time_tppsrv_regex.is_match(line) {
+        return Some((time_tppsrv_regex, time_pattern_tppsrv_dest.to_owned()));
+    }
+
+    None
+}
+
 fn timediff(
     reader: BufReader<File>,
     subtrahendregex: &str,
     minuendregex: &str,
     log_file_name: &str,
 ) {
-    let time_pattern = "^(\\d+)/(\\d+) (\\d+):(\\d+):(\\d+):(\\d+)";
-    let time_regex = Regex::new(time_pattern).unwrap();
+    let time_pattern_client_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
+    let time_pattern_client_dest = r"2021-$1-$2 $3:$4:$5:$6";
+    let time_client_regex = Regex::new(time_pattern_client_src).unwrap();
 
     let subtrahend_regex = Regex::new(subtrahendregex).unwrap();
     let minuend_regex = Regex::new(minuendregex).unwrap();
@@ -184,25 +223,14 @@ fn timediff(
         }
         let line = line.unwrap();
 
-        if let Some(caps) = time_regex.captures(&line) {
-            time_regex.replace(
-                caps.get(0).map_or("", |m| m.as_str()),
-                "2021-$1-$2 $3:$4:$5:$6",
-            );
-
-            // | sed -r "s/^([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3}) +([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4})/\5-\6-\7 \1:\2:\3:\4/" ^
-            // | sed -r "s/^([0-9]{2})[.-]([0-9]{2})[.-]([0-9]{4}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\3-\2-\1 \4:\5:\6:\7/" ^
-            // | sed -r "s/^([0-9]{4})[.-]([0-9]{2})[.-]([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/\1-\2-\3 \4:\5:\6:\7/" ^
-            // | sed -r "s/^([0-9]{2})\/([0-9]{2}) +([0-9]{2}):([0-9]{2}):([0-9]{2})[:.]([0-9]{3})/2021-\1-\2 \3:\4:\5:\6/" ^
-
-            let timestring = caps.get(0).map_or("", |m| m.as_str());
-            let mut complete_timestring: String = "2021/".to_owned();
-            let zeros: String = "000000".to_owned();
-            complete_timestring.push_str(timestring);
-            complete_timestring.push_str(&zeros);
+        if let Some(caps) = time_client_regex.captures(&line) {
+            let raw_time_string = caps.get(0).map_or("", |m| m.as_str()).to_owned();
+            let complete_timestring =
+                time_client_regex.replace(&raw_time_string, time_pattern_client_dest) + "000000";
+            // println!("{}", test);
 
             if let Ok(_linetime) =
-                NaiveDateTime::parse_from_str(&complete_timestring, "%Y/%m/%d %H:%M:%S:%f")
+                NaiveDateTime::parse_from_str(&complete_timestring, "%Y-%m-%d %H:%M:%S:%f")
             {
                 if subtrahend_regex.is_match(&line) {
                     println!("[ {}:{} ] {}", log_file_name, index + 1, &line);
@@ -259,7 +287,7 @@ fn main() {
 
     let opts = Opts::parse();
     let filename = opts.file_name;
-    let time_pattern = opts.regex.unwrap_or_default();
+    let time_pattern_client_src = opts.regex.unwrap_or_default();
     let cuthead = opts.starttime.unwrap_or_default();
     let cuttail = opts.stoptime.unwrap_or_default();
     let minuend_regex = opts.minuend_regex.unwrap_or_default();
@@ -268,7 +296,7 @@ fn main() {
 
     let file = File::open(&filename).unwrap();
     let reader = BufReader::new(file);
-    let re = Regex::new(&time_pattern).unwrap();
+    let re = Regex::new(&time_pattern_client_src).unwrap();
 
     match command {
         Command::Count => count(reader, re, args),
