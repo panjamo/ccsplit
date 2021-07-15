@@ -3,8 +3,8 @@ use std::env;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 // https://doc.rust-lang.org/std/collections/struct.HashMap.html
-use chrono::NaiveDateTime;
-use chrono::{offset::TimeZone, DateTime, Local};
+use chrono::{offset::TimeZone, DateTime, Datelike, Local};
+use chrono::{NaiveDateTime, ParseResult};
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -13,6 +13,7 @@ use std::str::FromStr;
 
 use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
+use chrono::format::{Parsed, StrftimeItems};
 use console::style;
 
 // TODO, homogenisieren der Logfiles ...
@@ -102,7 +103,7 @@ struct Opts {
 }
 
 fn write_line_to_key_file(findings: &mut HashMap<String, File>, key: &str, line: &str) {
-    let file = findings.entry(key.to_string()).or_insert_with(||
+    let file = findings.entry(key.to_string()).or_insert_with(|| {
         OpenOptions::new()
             .append(true)
             .create(true)
@@ -117,8 +118,8 @@ fn write_line_to_key_file(findings: &mut HashMap<String, File>, key: &str, line:
                     .replace(r"|", "_")
                     .replace("\"", "_"),
             )
-            .expect("cannot open file"),
-    );
+            .expect("cannot open file")
+    });
 
     file.write_all(line.as_bytes())
         .and(file.write_all(b"\n"))
@@ -194,63 +195,116 @@ fn timesplit(reader: BufReader<File>, cuthead: &str, cuttail: &str) {
     }
 }
 
-fn detect_time_regex(line: &str) -> Option<(Regex, String, bool)> {
-    let time_pattern_client_dest = r"2021-$1-$2 $3:$4:$5:$6";
+/// `LogTimeRegex`
+///
+///
+#[derive(Debug)]
+struct LogTimeRegex {
+    pub regex: Regex,
+    pub definition: String,
+    pub destination: String,
+}
+
+impl Default for LogTimeRegex {
+    fn default() -> Self {
+        Self {
+            regex: Regex::new(r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)").unwrap(),
+            definition: String::default(),
+            destination: String::from(r"2021-$1-$2 $3:$4:$5:$6"),
+        }
+    }
+}
+
+fn detect_time_regex(line: &str) -> Option<LogTimeRegex> {
     lazy_static! {
         static ref TIME_CLIENT_REGEX: Regex =
             Regex::new(r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)").unwrap();
-    }
-    if TIME_CLIENT_REGEX.is_match(line) {
-        return Some((
-            TIME_CLIENT_REGEX.clone(),
-            time_pattern_client_dest.to_owned(),
-            true,
-        ));
-    }
-
-    let time_pattern_thinmon_dest = r"$7-$6-$5 $1:$2:$3:$4";
-    lazy_static! {
         static ref TIME_THINMON_REGEX: Regex =
             Regex::new(r"^(\d{2}):(\d{2}):(\d{2})[:.](\d{3}) +(\d{2})[.-](\d{2})[.-](\d{4})")
                 .unwrap();
-    }
-    if TIME_THINMON_REGEX.is_match(line) {
-        return Some((
-            TIME_THINMON_REGEX.clone(),
-            time_pattern_thinmon_dest.to_owned(),
-            true,
-        ));
-    }
-
-    let time_pattern_renderslaveagent_dest = r"$1-$2-$3 $4:$5:$6:$7";
-    lazy_static! {
         static ref TIME_RENDERSLAVEAGENT_REGEX: Regex =
             Regex::new(r"^(\d{4})[.-](\d{2})[.-](\d{2}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})")
                 .unwrap();
-    }
-    if TIME_RENDERSLAVEAGENT_REGEX.is_match(line) {
-        return Some((
-            TIME_RENDERSLAVEAGENT_REGEX.clone(),
-            time_pattern_renderslaveagent_dest.to_owned(),
-            true,
-        ));
-    }
-
-    let time_pattern_tppsrv_dest = r"$3-$2-$1 $4:$5:$6:$7";
-    lazy_static! {
         static ref TIME_TPPSRV_REGEX: Regex =
             Regex::new(r"^(\d{2})[.-](\d{2})[.-](\d{4}) +(\d{2}):(\d{2}):(\d{2})[:.](\d{3})")
                 .unwrap();
     }
-    if TIME_TPPSRV_REGEX.is_match(line) {
-        return Some((
-            TIME_TPPSRV_REGEX.clone(),
-            time_pattern_tppsrv_dest.to_owned(),
-            true,
-        ));
-    }
 
-    None
+    if TIME_CLIENT_REGEX.is_match(line) {
+        Some(LogTimeRegex {
+            regex: TIME_CLIENT_REGEX.clone(),
+            definition: String::from("%m/%d %H:%M:%S:%3f"),
+            destination: String::from(r"2021-$1-$2 $3:$4:$5:$6"),
+        })
+    } else if TIME_THINMON_REGEX.is_match(line) {
+        Some(LogTimeRegex {
+            regex: TIME_THINMON_REGEX.clone(),
+            definition: String::from("%H:%M:%S.%3f %d.%m.%Y"),
+            destination: String::from(r"$7-$6-$5 $1:$2:$3:$4"),
+        })
+    } else if TIME_RENDERSLAVEAGENT_REGEX.is_match(line) {
+        Some(LogTimeRegex {
+            regex: TIME_RENDERSLAVEAGENT_REGEX.clone(),
+            definition: String::from("%Y.%m.%d %H:%M:%S.%3f"),
+            destination: String::from(r"$1-$2-$3 $4:$5:$6:$7"),
+        })
+    } else if TIME_TPPSRV_REGEX.is_match(line) {
+        Some(LogTimeRegex {
+            regex: TIME_TPPSRV_REGEX.clone(),
+            definition: String::from("%d.%m.%Y %H:%M:%S.%3f"),
+            destination: String::from(r"$3-$2-$1 $4:$5:$6:$7"),
+        })
+    } else {
+        None
+    }
+}
+
+fn smart_parse_naive_date_time_from_str(s: &str, strftime: &str) -> ParseResult<NaiveDateTime> {
+    let mut parsed = Parsed::new();
+    chrono::format::parse(&mut parsed, s, StrftimeItems::new(strftime));
+    match parsed.year {
+        // we have all values needed...
+        Some(_) => parsed,
+
+        // we are missing the year value. just set it to todays year
+        None => {
+            parsed.set_year(Local::now().year() as i64);
+            parsed
+        }
+    }
+    .to_naive_datetime_with_offset(0)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use chrono::{NaiveDate, NaiveTime};
+
+    #[test]
+    pub fn date_tests() {
+        let date = "07/15 20:38:15:123456789";
+        let detected = detect_time_regex(date).expect("date not recognized");
+
+        println!(
+            "{:?}",
+            smart_parse_naive_date_time_from_str(date, &detected.definition)
+                .map_err(|e| e.to_string())
+        );
+        assert_eq!(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(Local::now().year(), 7, 15),
+                NaiveTime::from_hms_milli(20, 38, 15, 123)
+            ),
+            smart_parse_naive_date_time_from_str(date, &detected.definition).unwrap()
+        );
+        assert_ne!(
+            NaiveDateTime::new(
+                NaiveDate::from_ymd(Local::now().year(), 7, 15),
+                NaiveTime::from_hms_milli(20, 38, 15, 321)
+            ),
+            smart_parse_naive_date_time_from_str(date, &detected.definition).unwrap()
+        );
+    }
 }
 
 fn timediff(
@@ -259,11 +313,8 @@ fn timediff(
     minuendregex: &str,
     log_file_name: &str,
 ) {
-    let time_pattern_src = r"^(\d+)/(\d+) (\d+):(\d+):(\d+):(\d+)";
-    let time_pattern_dest = r"2021-$1-$2 $3:$4:$5:$6".to_owned();
-    let time_regex = Regex::new(time_pattern_src).unwrap();
-
-    let mut times_tuple = (time_regex, time_pattern_dest, false);
+    let mut time_convention = None::<LogTimeRegex>;
+    let default_time_conv = LogTimeRegex::default();
 
     let subtrahend_regex = Regex::new(subtrahendregex).unwrap();
     let minuend_regex = Regex::new(minuendregex).unwrap();
@@ -271,34 +322,32 @@ fn timediff(
     let mut date_time: Option<DateTime<Local>> = None;
 
     for (index, line) in reader.lines().enumerate() {
-        if line.is_err() {
-            eprintln!("Error in line: {}", index);
-        }
-        let line = line.unwrap();
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => panic!("Error in line: {} ({})", index, e),
+        };
 
-        if !times_tuple.2 {
+        time_convention = time_convention.or_else(|| detect_time_regex(&line));
+        if time_convention.is_none() {
             // println!("? [ {}:{} ] {}", log_file_name, index + 1, &line);
-            if let Some(tt) = detect_time_regex(&line) {
-                times_tuple = tt;
-            }
         }
 
-        if let Some(caps) = times_tuple.0.captures(&line) {
+        let time_conv = time_convention.as_ref().unwrap_or(&default_time_conv);
+        if let Some(caps) = time_conv.regex.captures(&line) {
             let raw_time_string = caps.get(0).map_or("", |m| m.as_str()).to_owned();
-            let complete_timestring = times_tuple
-                .0
-                .replace(&raw_time_string, times_tuple.1.as_str())
-                + "000000";
-            // println!("{}", test);
+            let complete_timestring = time_conv
+                .regex
+                .replace(&raw_time_string, time_conv.destination.as_str())
+                /*+ "000000"*/;
 
-            if let Ok(_linetime) =
-                NaiveDateTime::parse_from_str(&complete_timestring, "%Y-%m-%d %H:%M:%S:%f")
+            if let Ok(linetime) =
+                NaiveDateTime::parse_from_str(&complete_timestring, "%Y-%m-%d %H:%M:%S:%3f")
             {
                 if minuend_regex.is_match(&line) {
                     println!("[ {}:{} ] {}", log_file_name, index + 1, &line);
-                    date_time = Some(Local.from_local_datetime(&_linetime).unwrap());
+                    date_time = Some(Local.from_local_datetime(&linetime).unwrap());
                 } else if date_time.is_some() && subtrahend_regex.is_match(&line) {
-                    let end_time: DateTime<Local> = Local.from_local_datetime(&_linetime).unwrap();
+                    let end_time: DateTime<Local> = Local.from_local_datetime(&linetime).unwrap();
                     let resulttime = end_time.signed_duration_since(date_time.unwrap());
                     println!(
                         "{} [ {}:{} ] {}",
