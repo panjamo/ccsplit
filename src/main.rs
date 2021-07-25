@@ -16,6 +16,8 @@ use clap::{crate_authors, crate_version, ArgEnum, Clap};
 use chrono::format::{Parsed, StrftimeItems};
 use console::style;
 
+mod db;
+
 // TODO, homogenisieren der Logfiles ...
 // pushd logs
 // for /R %%G in ( *.7z ) do pushd %%~dpG & 7z x "%%G" -y & popd
@@ -268,7 +270,9 @@ fn smart_parse_naive_date_time_from_str(s: &str, strftime: &str) -> ParseResult<
 
         // we are missing the year value. just set it to todays year
         None => {
-            parsed.set_year(Local::now().year() as i64);
+            parsed
+                .set_year(Local::now().year() as i64)
+                .expect("year invalid");
             parsed
         }
     }
