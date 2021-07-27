@@ -15,6 +15,7 @@ use clap::{crate_authors, crate_version, ArgEnum, Clap};
 
 use chrono::format::{Parsed, StrftimeItems};
 use console::style;
+use std::path::Path;
 
 mod db;
 
@@ -58,6 +59,7 @@ enum Command {
     Split,
     Time,
     Diff,
+    MakeQueryable,
 }
 
 impl FromStr for Command {
@@ -69,6 +71,7 @@ impl FromStr for Command {
             "split" => Ok(Self::Split),
             "time" => Ok(Self::Time),
             "diff" => Ok(Self::Diff),
+            "make-queryable" => Ok(Self::MakeQueryable),
             invalid => Err(format!("{} is an invalid command", invalid)),
         }
     }
@@ -89,10 +92,10 @@ struct Opts {
     /// e.g. --stoptime "2021-06-29 13:18:06"
     #[clap(long)]
     stoptime: Option<String>,
-    /// e.g. --subtrahend_regex  "regex"
+    /// e.g. --subtrahend-regex  "regex"
     #[clap(long)]
     subtrahend_regex: Option<String>,
-    /// e.g. --minuend_regex  "regex"
+    /// e.g. --minuend-regex  "regex"
     #[clap(long)]
     minuend_regex: Option<String>,
     #[clap(short, long)]
@@ -263,7 +266,7 @@ fn detect_time_regex(line: &str) -> Option<LogTimeRegex> {
 
 fn smart_parse_naive_date_time_from_str(s: &str, strftime: &str) -> ParseResult<NaiveDateTime> {
     let mut parsed = Parsed::new();
-    chrono::format::parse(&mut parsed, s, StrftimeItems::new(strftime));
+    chrono::format::parse(&mut parsed, s, StrftimeItems::new(strftime))?;
     match parsed.year {
         // we have all values needed...
         Some(_) => parsed,
@@ -403,6 +406,13 @@ fn count(reader: BufReader<File>, re: Regex, args: Vec<String>) {
     }
 }
 
+fn make_queryable(file_path: impl AsRef<str>, rx: Regex) -> Result<(), db::DatabaseErr> {
+    let file_path = Path::new(file_path.as_ref());
+    db::Queryable::new(file_path.with_extension("db").to_string_lossy())
+        .import_from_file(file_path, rx.as_str())
+        .map(|_| ())
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -424,6 +434,7 @@ fn main() {
         Command::Split => split(reader, re),
         Command::Time => timesplit(reader, &cuthead, &cuttail),
         Command::Diff => timediff(reader, &subtrahend_regex, &minuend_regex, &filename),
+        Command::MakeQueryable => make_queryable(filename, re).expect("unable to make queryable"),
     }
 }
 // extern crate regex;

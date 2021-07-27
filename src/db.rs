@@ -6,6 +6,7 @@ use std::io::Read;
 use std::iter::FromIterator;
 
 use regex::{Captures, Match, Regex};
+use std::ffi::OsStr;
 use std::path::Path;
 
 #[derive(Debug)]
@@ -36,34 +37,41 @@ impl From<regex::Error> for DatabaseErr {
 /// `Queryable`
 ///
 ///
-struct Queryable {
+pub struct Queryable {
     file: String,
-    log_name: String,
 }
 
 impl Queryable {
-    pub fn new(file: impl AsRef<str>, log_name: impl AsRef<str>) -> Self {
+    pub fn new(file: impl AsRef<str>) -> Self {
         Self {
             file: file.as_ref().to_owned(),
-            log_name: log_name.as_ref().to_owned(),
         }
     }
 
     pub fn import_from_file(
         &self,
-        mut file: impl AsRef<Path>,
+        file: impl AsRef<Path>,
         regex_str: impl AsRef<str>,
     ) -> Result<usize, DatabaseErr> {
+        let table_name = file
+            .as_ref()
+            .with_extension("")
+            .file_name()
+            .and_then(OsStr::to_str)
+            .map(ToOwned::to_owned)
+            .expect("invalid log file name");
+
         let mut buf = String::new();
-        File::open(file)
+        File::open(file.as_ref())
             .and_then(|mut f| f.read_to_string(&mut buf).map(|_| buf))
             .map_err(Into::into)
-            .and_then(|ref content| self.import_from_str(content, regex_str))
+            .and_then(|ref content| self.import_from_str(content, table_name, regex_str))
     }
 
     pub fn import_from_str(
         &self,
         s: impl AsRef<str>,
+        table_name: impl AsRef<str>,
         regex_str: impl AsRef<str>,
     ) -> Result<usize, DatabaseErr> {
         let rx = Regex::new(regex_str.as_ref())?;
@@ -73,20 +81,21 @@ impl Queryable {
             .map(|n: &str| format!(", {} STRING", n));
 
         let query = format!(
-            "DROP TABLE IF EXISTS {log_name};CREATE TABLE {log_name} (line_no INTEGER PRIMARY KEY{});",
+            "DROP TABLE IF EXISTS {table_name};CREATE TABLE {table_name} (line_no INTEGER PRIMARY KEY{});",
             String::from_iter(cols),
-            log_name = &self.log_name,
+            table_name = table_name.as_ref(),
         );
 
         Connection::open(&self.file)
             .and_then(|c| c.execute_batch(&query).map(|_| c))
             .map_err(Into::into)
-            .and_then(|mut c| self.populate_table_from(&mut c, s.as_ref(), &rx))
+            .and_then(|mut c| self.populate_table_from(&mut c, table_name, s.as_ref(), &rx))
     }
 
     fn populate_table_from(
         &self,
         conn: &mut Connection,
+        table_name: impl AsRef<str>,
         content: &str,
         regex: &Regex,
     ) -> Result<usize, DatabaseErr> {
@@ -113,7 +122,7 @@ impl Queryable {
         let cols: Vec<_> = regex.capture_names().flat_map(|e| e).collect();
         let query = format!(
             "INSERT INTO {} ({}) VALUES ({})",
-            &self.log_name,
+            table_name.as_ref(),
             cols.join(", "),
             std::iter::repeat("?")
                 .take(cols.len())
@@ -143,7 +152,7 @@ mod tests {
         let pattern = r"(?P<date_time>\d+\.\d+\.\d+ \d+:\d+:\d+:\d+) (Id:(?P<thread_id_old>\d+)|(?P<proc_id>\d+) (?P<thread_id>\d+))( \((?P<originator_thread_id>\d+)\)|) (?P<severity>\w+)/[^: ]*.( DLL|) (?P<file_line>[\w.]+:\d+)( (?P<signature>\[[^\[\]]+\]\w+)|) (?P<module>\w+) (?P<message>.*)";
         // let pattern = r"(?P<date_time>\d+\.\d+\.\d+ \d+:\d+:\d+:\d+) (?P<proc_id>\d+) (?P<thread_id>\d+) (?P<severity>\w+)/[^:]* (?P<file_line>[\w.]+:\d+) (?P<signature>[^ ]+|) (?P<module>\w+) (?P<message>.*)";
 
-        let q = Queryable::new(r"c:\temp\log_file.db", "TPAutoConnSvc");
+        let q = Queryable::new(r"c:\temp\log_file.db");
         let data = q
             .import_from_file(r"C:\Temp\TPAutoConnSvc.log", pattern)
             .unwrap();
@@ -155,7 +164,7 @@ mod tests {
     pub fn ac2_database_from_test() {
         let pattern = r"(?P<date_time>\d+\.\d+\.\d+ \d+:\d+:\d+:\d+) (Id:(?P<thread_id_old>\d+)|(?P<proc_id>\d+) (?P<thread_id>\d+))( \((?P<originator_thread_id>\d+)\)|) (?P<severity>\w+)/[^: ]*.( DLL|) (?P<file_line>[\w.]+:\d+)( (?P<signature>\[[^\[\]]+\]\w+)|) (?P<module>\w+) (?P<message>.*)";
 
-        let q = Queryable::new(r"c:\temp\log_file.db", "TPAutoConnect");
+        let q = Queryable::new(r"c:\temp\log_file.db");
         let data = q
             .import_from_file(r"C:\Temp\TPAutoConnect.log", pattern)
             .unwrap();
@@ -168,7 +177,7 @@ mod tests {
         // 07/05 12:32:47:137 11900 4168 _INF_ CommunicationSocketAsync.cpp:332 [CommunicationSocketAsync::HandleOnClose] Socket OnClose Event (DataS 0x2f4)
         let pattern = r"((?P<date_time>\d+/\d+ \d+:\d+:\d+:\d+) (?P<proc_id>\d+) (?P<thread_id>\d+) (?P<severity>\w+) (?P<file_line>[\w.]+:\d+) (?P<signature>\[[^\[\]]+\]) ){0,1}(?P<message>.*)";
 
-        let q = Queryable::new(r"c:\temp\log_file.db", "ThnClnt");
+        let q = Queryable::new(r"c:\temp\log_file.db");
         let data = q
             .import_from_file(r"C:\Temp\client_utf8.log", pattern)
             .unwrap();
