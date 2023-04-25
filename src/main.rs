@@ -137,7 +137,11 @@ fn split(reader: BufReader<File>, re: Regex) {
         let line = line.unwrap();
         if let Some(caps) = re.captures(&line) {
             let cap = caps.get(1).map_or("", |m| m.as_str());
-            let rawfilename = format!("{}.log", cap);
+            let mut shorten_cap = cap;
+            if shorten_cap.len() > 251 {
+                shorten_cap = &cap[..251];
+            }
+            let rawfilename = format!("{}.log", shorten_cap);
             last_used_file_name = rawfilename.to_string();
             write_line_to_key_file(&mut findings, &rawfilename, &line);
         } else {
